@@ -81,35 +81,42 @@ class Maze:
         return self.paths
 
     def create_paths(self, row = 0, column = 0):
-        cell = self.set_way_point(row, column)
-        if cell['position'] == self.maze_exit:
-            # We found the exit! Save the path through the maze.
-            self.path_through_maze = self.breadcrumbs
-        directions = self.get_possible_directions(cell)
-        if directions:
-            # when not in a dead end choose the direction of the next step
-            next_step = random.choice(directions)
-            self.step_count = self.step_count + 1
-            if self.step_count < self.max_steps:
-                self.create_paths(row + self.pos[next_step]['r'], 
-                                  column + self.pos[next_step]['c'])
+        while True: # change recursion to a while loop
+            cell = self.set_way_point(row, column)
+            if cell['position'] == self.maze_exit:
+                # We found the exit! Save the path through the maze.
+                self.path_through_maze = self.breadcrumbs
+            directions = self.get_possible_directions(cell)
+            if directions:
+                # when not in a dead end choose the direction of the next step
+                next_step = random.choice(directions)
+                self.step_count = self.step_count + 1
+                if self.step_count < self.max_steps:
+                    # update parameters instead of tail recursion
+                    row = row + self.pos[next_step]['r']
+                    column = column + self.pos[next_step]['c']
+#                     self.create_paths(row + self.pos[next_step]['r'], 
+#                                       column + self.pos[next_step]['c'])
+                else:
+                    # save last path and end function
+                    self.paths.append(self.path_steps)
+                    return
             else:
-                # save last path
-                self.paths.append(self.path_steps)
-        else:
-            # when in a dead end save current path end trace back
-            if len(self.path_steps) > 1:
-                # a proper path has at least two steps
-                self.paths.append(self.path_steps)
-            self.path_steps = []
-            if self.breadcrumbs:
-                self.breadcrumbs.pop() # go back one step
-                if len(self.breadcrumbs) > 0:
-                    # use current position as starting point for new path
-                    row, column = self.breadcrumbs.pop()
-                    self.create_paths(row, column)
-                # The maze is complte when there are no more way points in the 
-                # breadcrumbs list. All possible paths have been created. 
+                # when in a dead end save current path end trace back
+                if len(self.path_steps) > 1:
+                    # a proper path has at least two steps
+                    self.paths.append(self.path_steps)
+                self.path_steps = []
+                if self.breadcrumbs:
+                    self.breadcrumbs.pop() # go back one step
+                    if len(self.breadcrumbs) > 0:
+                        # use current position as starting point for new path
+                        row, column = self.breadcrumbs.pop()
+#                         self.create_paths(row, column)
+                    else:
+                        # The maze is complete when there are no more way points in the 
+                        # breadcrumbs list. All possible paths have been created.
+                        return
 
     def set_way_point(self, row, column):
         self.breadcrumbs.append([row, column])
