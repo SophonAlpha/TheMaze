@@ -35,18 +35,15 @@ def main():
     maze_dimensions = {'rows': rows, 'columns': columns}
     maze_entry = {'row': 0, 'column': 0}
     maze_exit = {'row': rows-1, 'column': columns-1}
-    max_steps = 2000
-    maze = Maze(maze_dimensions, maze_entry, maze_exit, max_steps)
-    paths = maze.create_maze(row = maze_entry['row'],
-                             column = maze_entry['column'])
-
-    # create image, white background
-    save_maze_image(paths, rows, columns, dpmm)
+    maze = Maze(maze_dimensions, maze_entry, maze_exit)
+    maze.create_maze(start_row = maze_entry['row'],
+                     start_column = maze_entry['column'])
+    maze.save_maze_image(dpmm)
     print('Done!')
 
 class Maze:
     
-    def __init__(self, maze_dimensions, maze_entry, maze_exit, max_steps):
+    def __init__(self, maze_dimensions, maze_entry, maze_exit):
         # deltas for each step direction
         self.pos = {'up': {'c': 0, 'r': -1},
                     'right': {'c': 1, 'r': 0}, 
@@ -56,7 +53,6 @@ class Maze:
         self.maze_entry = maze_entry
         self.maze_exit = maze_exit
         self.step_count = 0
-        self.max_steps = max_steps
         self.path_steps = []
         self.paths = []
         self.breadcrumbs = []
@@ -75,8 +71,8 @@ class Maze:
                                                             'right': True,
                                                             'left': True},
                                                   'isWayPoint': False})
-    def create_maze(self, row = 0, column = 0):
-        self.create_paths(row, column)
+    def create_maze(self, start_row = 0, start_column = 0):
+        self.create_paths(start_row, start_column)
         self.set_walls()
         return self.paths
 
@@ -85,26 +81,17 @@ class Maze:
             cell = self.set_way_point(row, column)
             if cell['position'] == self.maze_exit:
                 # We found the exit! Save the path through the maze.
-                self.path_through_maze = self.breadcrumbs
+                self.path_through_maze = self.breadcrumbs[:]
             directions = self.get_possible_directions(cell)
             if directions:
                 # when not in a dead end choose the direction of the next step
                 next_step = random.choice(directions)
-                self.step_count = self.step_count + 1
-                if self.step_count < self.max_steps:
-                    # update parameters instead of tail recursion
-                    row = row + self.pos[next_step]['r']
-                    column = column + self.pos[next_step]['c']
-#                     self.create_paths(row + self.pos[next_step]['r'], 
-#                                       column + self.pos[next_step]['c'])
-                else:
-                    # save last path and end function
-                    self.paths.append(self.path_steps)
-                    return
+                row = row + self.pos[next_step]['r']
+                column = column + self.pos[next_step]['c']
             else:
                 # when in a dead end save current path end trace back
                 if len(self.path_steps) > 1:
-                    # a proper path has at least two steps
+                    # a path has at least two way points
                     self.paths.append(self.path_steps)
                 self.path_steps = []
                 if self.breadcrumbs:
@@ -112,7 +99,6 @@ class Maze:
                     if len(self.breadcrumbs) > 0:
                         # use current position as starting point for new path
                         row, column = self.breadcrumbs.pop()
-#                         self.create_paths(row, column)
                     else:
                         # The maze is complete when there are no more way points in the 
                         # breadcrumbs list. All possible paths have been created.
@@ -156,32 +142,86 @@ class Maze:
         return directions
     
     def set_walls(self):
-        pass
+        for path in self.paths:
+            for i, _ in enumerate(path[:-1]):
+                self.remove_wall(path[i], path[i+1])
+    
+    def remove_wall(self, start_cell, end_cell):
+        lookup_table = {(-1, 0): {'start': 'up', 'end': 'down'},
+                        (1, 0): {'start': 'down', 'end': 'up'},
+                        (0, 1): {'start': 'right', 'end': 'left'},
+                        (0, -1): {'start': 'left', 'end': 'right'}}
+        dr = end_cell[0] - start_cell[0]
+        dc = end_cell[1] - start_cell[1]
+        # remove wall in start cell
+        cell = self.maze.loc[start_cell[0], start_cell[1]]
+        start_cell_wall = lookup_table[(dr, dc)]['start']
+        cell['walls'][start_cell_wall] = False
+        self.maze.set_value(start_cell[0], start_cell[1], cell)
+        # remove wall in end cell
+        cell = self.maze.loc[end_cell[0], end_cell[1]]
+        end_cell_wall = lookup_table[(dr, dc)]['end']
+        cell['walls'][end_cell_wall] = False
+        self.maze.set_value(end_cell[0], end_cell[1], cell)
 
-def save_maze_image(paths, rows, columns, dpmm):
-    img_width = int(columns * cell_size * dpmm)
-    img_height = int(rows * cell_size * dpmm)
-    img = np.ones((img_height,img_width,3), np.uint8)*255
-    # draw the create_paths path
-    for path in paths:
-        for i, _ in enumerate(path[:-1]):
-            start_cell = path[i]
-            end_cell = path[i+1]
-            startx = int((start_cell[1] * cell_size + cell_size/2) * dpmm)
-            starty = int((start_cell[0] * cell_size + cell_size/2) * dpmm)
-            endx   = int((end_cell[1] * cell_size + cell_size/2) * dpmm)
-            endy   = int((end_cell[0] * cell_size + cell_size/2) * dpmm)
-            img = cv2.line(img,(startx, starty),(endx, endy),(0,0,255),1)
-     
-    # Draw a diagonal lines with thickness of 1 px
-    img = cv2.line(img,(0,0),(img_width,img_height),(0,0,0),1)
-    img = cv2.line(img,(img_width,0),(0,img_height),(0,0,0),1)
-    # Draw border lines with thickness of 1 px
-    img = cv2.line(img,(0,0),(img_width,0),(0,0,0),1)
-    img = cv2.line(img,(0,0),(0,img_height),(0,0,0),1)
-    img = cv2.line(img,(img_width,0),(img_width,img_height),(0,0,0),1)
-    img = cv2.line(img,(0,img_height),(img_width,img_height),(0,0,0),1)
-    cv2.imwrite('maze.png',img)
+    def save_maze_image(self, dpmm):
+        img_width = int(self.maze_dimensions['columns'] * cell_size * dpmm)
+        img_height = int(self.maze_dimensions['rows'] * cell_size * dpmm)
+        img = np.ones((img_height,img_width,3), np.uint8)*255
+        # draw all walls
+        if True:
+            for index, row in self.maze.iterrows():
+                for cell in row:
+                    self.draw_walls(img, cell, (0,0,0), dpmm)
+        # draw all paths
+        if False:
+            for path in self.paths:
+                for i, _ in enumerate(path[:-1]):
+                    self.draw_line(img, path[i], path[i+1], (0,0,255), dpmm)
+        # draw the path through the maze
+        if True:
+            for i, _ in enumerate(self.path_through_maze[:-1]):
+                self.draw_line(img,
+                               self.path_through_maze[i],
+                               self.path_through_maze[i+1],
+                               (255,0,0),
+                               dpmm)
+        cv2.imwrite('maze.png', img)
+
+    def draw_walls(self, img, cell, colour, dpmm):
+        row = cell['position']['row']
+        column = cell['position']['column']
+        if cell['walls']['up']:
+            startx = int((column * cell_size) * dpmm)
+            starty = int((row * cell_size) * dpmm)
+            endx   = int((column * cell_size + cell_size) * dpmm)
+            endy   = starty
+            img = cv2.line(img, (startx, starty), (endx, endy), colour, 3)
+        if cell['walls']['down']:
+            startx = int((column * cell_size) * dpmm)
+            starty = int((row * cell_size + cell_size) * dpmm)
+            endx   = int((column * cell_size + cell_size) * dpmm)
+            endy   = starty
+            img = cv2.line(img, (startx, starty), (endx, endy), colour, 3)
+        if cell['walls']['right']:
+            startx = int((column * cell_size + cell_size) * dpmm)
+            starty = int((row * cell_size) * dpmm)
+            endx   = startx
+            endy   = int((row * cell_size + cell_size) * dpmm)
+            img = cv2.line(img, (startx, starty), (endx, endy), colour, 3)
+        if cell['walls']['left']:
+            startx = int((column * cell_size) * dpmm)
+            starty = int((row * cell_size) * dpmm)
+            endx   = startx
+            endy   = int((row * cell_size + cell_size) * dpmm)
+            img = cv2.line(img, (startx, starty), (endx, endy), colour, 3)
+
+    def draw_line(self, img, start_cell, end_cell, colour, dpmm):
+        startx = int((start_cell[1] * cell_size + cell_size/2) * dpmm)
+        starty = int((start_cell[0] * cell_size + cell_size/2) * dpmm)
+        endx   = int((end_cell[1] * cell_size + cell_size/2) * dpmm)
+        endy   = int((end_cell[0] * cell_size + cell_size/2) * dpmm)
+        img = cv2.line(img, (startx, starty), (endx, endy), colour, 1)
 
 # ------------------- main -----------------------------------------------------
 
