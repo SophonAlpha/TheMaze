@@ -5,10 +5,13 @@ import random
 import cv2
 
 # ---------- script configuration ----------------------------------------------
-print_size = 'A1'
+print_size = 'A4'
 file_name = 'maze.png'
-cell_size = 15 # cell size in mm, this is also the distance betwen walls
+cell_size = 20 # cell size in mm, this is the distance between walls
 dpi = 300 # print quality in dots per inch
+# the following parameters control the complexity of the maze
+max_walkers = 3
+walker_every_x_steps = 5
 # ------------------------------------------------------------------------------
 
 def main():
@@ -18,7 +21,8 @@ def main():
     maze_dimensions = {'rows': image.rows, 'columns': image.columns}
     maze_entry = {'row': 0, 'column': 0}
     maze_exit = {'row': image.rows-1, 'column': image.columns-1}
-    maze = Maze(maze_dimensions, maze_entry, maze_exit)
+    maze = Maze(maze_dimensions, maze_entry, maze_exit,
+                max_walkers, walker_every_x_steps)
     maze.create_maze(start_row = maze_entry['row'],
                      start_column = maze_entry['column'])
     # save the image in an image file
@@ -48,19 +52,19 @@ class MazeImage:
         self.dpmm = dpi/inch # dots per mm
         self.rows = int(paper_sizes[print_size]['height']/cell_size)
         self.columns = int(paper_sizes[print_size]['width']/cell_size)
-        self.b_up = int(cell_size * self.dpmm)
-        self.b_down = int(cell_size * self.dpmm)
-        self.b_right = int(cell_size * self.dpmm)
-        self.b_left = int(cell_size * self.dpmm)
+        self.border_up = int(cell_size * self.dpmm)
+        self.border_down = int(cell_size * self.dpmm)
+        self.border_right = int(cell_size * self.dpmm)
+        self.border_left = int(cell_size * self.dpmm)
 
     def maze_to_image(self, maze, image_file_name, 
                       walls = True, paths = False, path_through = False):
-        img_width = self.b_left + \
+        img_width = self.border_left + \
                     int(maze.maze_dimensions['columns'] * cell_size * self.dpmm) + \
-                    self.b_right
-        img_height = self.b_up + \
+                    self.border_right
+        img_height = self.border_up + \
                      int(maze.maze_dimensions['rows'] * cell_size * self.dpmm) + \
-                     self.b_down
+                     self.border_down
         self.img = np.ones((img_height,img_width,3), np.uint8)*255
         # draw all walls
         if walls:
@@ -118,25 +122,20 @@ class MazeImage:
         
     def cv2_line(self, startx, starty , endx, endy , colour, pt):
         self.img = cv2.line(self.img,
-                            (startx + self.b_left, starty + self.b_up),
-                            (endx + self.b_left, endy + self.b_up), colour, pt)
+                            (startx + self.border_left, starty + self.border_up),
+                            (endx + self.border_left, endy + self.border_up), colour, pt)
 
 class Maze:
     
-    def __init__(self, maze_dimensions, maze_entry, maze_exit):
-        # deltas for each step direction
-        self.pos = {'up': {'c': 0, 'r': -1},
-                    'right': {'c': 1, 'r': 0}, 
-                    'left': {'c': -1, 'r': 0}, 
-                    'down': {'c': 0, 'r': 1}}
+    def __init__(self, maze_dimensions, maze_entry, maze_exit,
+                 max_walkers = 1, walker_every_x_steps = 10):
         self.maze_dimensions = maze_dimensions
         self.maze_entry = maze_entry
         self.maze_exit = maze_exit
-        self.step_count = 0
-        self.path_steps = []
+        self.walker_every_x_steps = walker_every_x_steps
+        self.max_walkers = max_walkers
+        self.walkers = []
         self.paths = []
-        self.breadcrumbs = []
-        self.path_through_maze = []
         self.initialise_maze()
 
     def initialise_maze(self):
@@ -148,83 +147,43 @@ class Maze:
                         'walls': {'up': True, 'down': True, 'right': True, 'left': True},
                         'isWayPoint': False}
                 self.maze.set_value(row, column, cell.copy())
+
     def create_maze(self, start_row = 0, start_column = 0):
         self.create_paths(start_row, start_column)
         self.set_walls()
         self.open_maze(self.maze_entry['row'], self.maze_entry['column'])
         self.open_maze(self.maze_exit['row'], self.maze_exit['column'])
-        return self.paths
 
     def create_paths(self, row = 0, column = 0):
-        while True: # change recursion to a while loop
-            cell = self.set_way_point(row, column)
-            if cell['position'] == self.maze_exit:
-                # We found the exit! Save the path through the maze.
-                self.path_through_maze = self.breadcrumbs[:]
-            directions = self.get_possible_directions(cell)
-            if directions:
-                # when not in a dead end choose the direction of the next step
-                next_step = random.choice(directions)
-                row = row + self.pos[next_step]['r']
-                column = column + self.pos[next_step]['c']
-            else:
-                # when in a dead end save current path end trace back
-                if len(self.path_steps) > 1:
-                    # a path has at least two way points
-                    self.paths.append(self.path_steps)
-                self.path_steps = []
-                if self.breadcrumbs:
-                    self.breadcrumbs.pop() # go back one step
-                    if len(self.breadcrumbs) > 0:
-                        # use current position as starting point for new path
-                        row, column = self.breadcrumbs.pop()
-                    else:
-                        # The maze is complete when there are no more way points in the 
-                        # breadcrumbs list. All possible paths have been created.
-                        return
+        if not(self.walkers):
+            # initialise the first walker
+            self.create_walker(row, column)
+        while self.walkers:
+            for walker in self.walkers:
+                walker.move_one_step()
+                self.remove_finished_walker(walker)
+                self.generate_new_walkers(walker)
 
-    def set_way_point(self, row, column):
-        self.breadcrumbs.append([row, column])
-        self.path_steps.append([row, column])
-        cell = self.maze.loc[row, column]
-        cell['isWayPoint'] = True
-        self.maze.set_value(row, column, cell)
-        return cell
+    def create_walker(self, row, column):
+        if not(len(self.walkers) >= self.max_walkers):
+            walker = Walker(self.maze, row, column)
+            self.walkers.append(walker)
 
-    def get_possible_directions(self, cell):
-        directions = self.get_directions(cell)
-        directions = self.avoid_outside_maze(directions, cell)
-        directions = self.avoid_set_way_points(directions, cell)
-        return directions
+    def remove_finished_walker(self, walker):
+        if walker.is_finished:
+            self.paths = self.paths + walker.paths
+            self.walkers.remove(walker)
 
-    def get_directions(self, cell):
-        directions = [w for w in cell['walls']]
-        return directions
-
-    def avoid_walls(self, cell):
-        directions = [w for w in cell['walls'] 
-                      if cell['walls'][w] == False]
-        return directions
-    
-    def avoid_outside_maze(self, directions, cell):
-        r = cell['position']['row']
-        c = cell['position']['column']
-        directions = [d for d in directions
-                      if r + self.pos[d]['r'] in self.maze.index and c + self.pos[d]['c'] in self.maze.columns]
-        return directions
-    
-    def avoid_set_way_points(self, directions, cell):
-        r = cell['position']['row']
-        c = cell['position']['column']
-        directions = [d for d in directions 
-                      if self.maze.loc[r + self.pos[d]['r'], c + self.pos[d]['c']]['isWayPoint'] == False]
-        return directions
+    def generate_new_walkers(self, walker):
+        if walker.step_count >= self.walker_every_x_steps:
+            # Start a new walker at the same position of the current walker.
+            self.create_walker(walker.row, walker.column)
     
     def set_walls(self):
         for path in self.paths:
             for i, _ in enumerate(path[:-1]):
                 self.remove_wall(path[i], path[i+1])
-    
+
     def remove_wall(self, start_cell, end_cell):
         lookup_table = {(-1, 0): {'start': 'up', 'end': 'down'},
                         (1, 0): {'start': 'down', 'end': 'up'},
@@ -257,6 +216,94 @@ class Maze:
         if column == self.maze.columns[-1]:
             cell['walls']['right'] = False
             self.maze.set_value(row, column, cell)
+
+class Walker:
+    
+    def __init__(self, maze, row, column):
+        # deltas for each step direction
+        self.pos = {'up': {'c': 0, 'r': -1},
+                    'right': {'c': 1, 'r': 0}, 
+                    'left': {'c': -1, 'r': 0}, 
+                    'down': {'c': 0, 'r': 1}}
+        self.maze = maze
+        self.row = row
+        self.column = column
+        self.step_count = 0
+        self.path_steps = []
+        self.paths = []
+        self.breadcrumbs = []
+        self.is_finished = False
+        self.set_way_point(self.row, self.column)
+
+    def move_one_step(self):
+        directions = self.get_possible_directions()
+        if directions:
+            # when not in a dead end choose the direction of the next step
+            next_step = random.choice(directions)
+            self.row = self.row + self.pos[next_step]['r']
+            self.column = self.column + self.pos[next_step]['c']
+        else:
+            # when in a dead end save current path end trace back
+            self.save_current_path()
+            self.trace_back()
+        if not(self.is_finished):
+            self.set_way_point(self.row, self.column)
+
+    def set_way_point(self, row, column):
+        self.breadcrumbs.append([row, column])
+        self.path_steps.append([row, column])
+        self.step_count += 1
+        cell = self.maze.loc[row, column]
+        cell['isWayPoint'] = True
+        self.maze.set_value(row, column, cell)
+
+    def get_possible_directions(self):
+        cell = self.maze.loc[self.row, self.column]
+        directions = self.get_directions(cell)
+        directions = self.avoid_outside_maze(directions, cell)
+        directions = self.avoid_set_way_points(directions, cell)
+        return directions
+
+    def get_directions(self, cell):
+        directions = [w for w in cell['walls']]
+        return directions
+
+    def avoid_walls(self, cell): # not used but kept for future use
+        directions = [w for w in cell['walls'] 
+                      if cell['walls'][w] == False]
+        return directions
+    
+    def avoid_outside_maze(self, directions, cell):
+        r = cell['position']['row']
+        c = cell['position']['column']
+        directions = [d for d in directions
+                      if r + self.pos[d]['r'] in self.maze.index and c + self.pos[d]['c'] in self.maze.columns]
+        return directions
+    
+    def avoid_set_way_points(self, directions, cell):
+        r = cell['position']['row']
+        c = cell['position']['column']
+        directions = [d for d in directions 
+                      if self.maze.loc[r + self.pos[d]['r'], c + self.pos[d]['c']]['isWayPoint'] == False]
+        return directions
+    
+    def save_current_path(self):
+        if len(self.path_steps) > 1:
+            # a path has at least two way points
+            self.paths.append(self.path_steps)
+        self.path_steps = []
+
+    def trace_back(self):
+        if self.breadcrumbs:
+            self.breadcrumbs.pop() # go back one step
+            if self.breadcrumbs:
+                # use current position as starting point for new path
+                self.row, self.column = self.breadcrumbs.pop()
+            else:
+                # The walker can't move anywhere.
+                self.is_finished = True
+        else:
+            self.is_finished = True
 
 # ------------------- main -----------------------------------------------------
 
