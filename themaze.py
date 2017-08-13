@@ -5,13 +5,12 @@ import random
 import cv2
 
 # ---------- script configuration ----------------------------------------------
-print_size = 'A4'
+print_size = 'A1'
 file_name = 'maze.png'
-cell_size = 20 # cell size in mm, this is the distance between walls
+cell_size = 10 # cell size in mm, this is the distance between walls
 dpi = 300 # print quality in dots per inch
 # the following parameters control the complexity of the maze
-max_walkers = 3
-walker_every_x_steps = 5
+walker_every_x_steps = 10
 # ------------------------------------------------------------------------------
 
 def main():
@@ -22,7 +21,7 @@ def main():
     maze_entry = {'row': 0, 'column': 0}
     maze_exit = {'row': image.rows-1, 'column': image.columns-1}
     maze = Maze(maze_dimensions, maze_entry, maze_exit,
-                max_walkers, walker_every_x_steps)
+                walker_every_x_steps)
     maze.create_maze(start_row = maze_entry['row'],
                      start_column = maze_entry['column'])
     # save the image in an image file
@@ -128,14 +127,14 @@ class MazeImage:
 class Maze:
     
     def __init__(self, maze_dimensions, maze_entry, maze_exit,
-                 max_walkers = 1, walker_every_x_steps = 10):
+                 walker_every_x_steps = 10):
         self.maze_dimensions = maze_dimensions
         self.maze_entry = maze_entry
         self.maze_exit = maze_exit
         self.walker_every_x_steps = walker_every_x_steps
-        self.max_walkers = max_walkers
         self.active_walkers = []
         self.walker_tree = None # store all walkers in a tree structure
+        self.path_list = []
         self.initialise_maze()
 
     def initialise_maze(self):
@@ -161,34 +160,59 @@ class Maze:
         while self.active_walkers:
             for walker in self.active_walkers:
                 walker.move_one_step()
+                self.remove_stuck_walkers(walker)
+                self.start_new_walkers(walker)
                 self.remove_finished_walker(walker)
-                self.generate_new_walkers(walker)
 
     def create_walker(self, row, column, parent_walker = None):
-        if len(self.active_walkers) <= self.max_walkers:
-            walker = Walker(self.maze, row, column, parent_walker)
-            self.active_walkers.append(walker)
-            if parent_walker != None:
-                # Only if the walker is not the root of the walker tree
-                # add the new walker as a child node to its parent.
-                parent_walker.walker_childs.append(walker)
+        walker = Walker(self.maze, row, column, parent_walker)
+        self.active_walkers.append(walker)
+        if parent_walker != None:
+            # Only if the walker is not the root of the walker tree
+            # add the new walker as a child node to its parent.
+            parent_walker.walker_childs.append(walker)
         return walker
 
-    def remove_finished_walker(self, walker):
-        if walker.is_finished:
-            self.path_tree = self.paths + walker.paths
-            self.active_walkers.remove(walker)
-
-    def generate_new_walkers(self, walker):
+    def start_new_walkers(self, walker):
         if (walker.step_count % self.walker_every_x_steps) == 0:
             # Start a new walker at the same position of the current walker.
             self.create_walker(walker.row, walker.column, walker)
-    
+        if walker.direction == 'trace_back' and \
+           not(walker.is_paused) and \
+           len(walker.breadcrumbs) > 0:
+            # Start a new walker at the current trace back point.
+            self.create_walker(walker.row, walker.column, walker)
+            walker.is_paused = True
+
+    def remove_stuck_walkers(self, walker):
+        # Remove walkers that couldn't make more than one step from the 
+        # walker tree.
+        if walker.is_finished and len(walker.path_steps) <= 1:
+            walker.parent_walker.walker_childs.remove(walker)
+
+    def remove_finished_walker(self, walker):
+        if walker.is_finished:
+            if not(walker.parent_walker == None):
+                # parent walker to continue trace back
+                walker.parent_walker.is_paused = False
+            self.active_walkers.remove(walker)
+
     def set_walls(self):
-        for path in self.paths:
+        paths = self.list_all_paths(self.walker_tree)
+        for path in paths:
             for i, _ in enumerate(path[:-1]):
                 self.remove_wall(path[i], path[i+1])
 
+    def list_all_paths(self, walker):
+        path_list = [walker.path_steps]
+        child_list = walker.walker_childs
+        while child_list:
+            child = child_list.pop()
+            path_list.append(child.path_steps)
+            if child.walker_childs:
+                child_list = child_list + child.walker_childs
+        return path_list
+    
     def remove_wall(self, start_cell, end_cell):
         lookup_table = {(-1, 0): {'start': 'up', 'end': 'down'},
                         (1, 0): {'start': 'down', 'end': 'up'},
@@ -235,26 +259,28 @@ class Walker:
         self.column = column
         self.parent_walker = parent_walker # which walker generated this walker?
         self.walker_childs = [] # list of child walkers generated by this walker
+        self.direction = 'forward'
+        self.is_paused = False
+        self.is_finished = False
         self.step_count = 0
         self.path_steps = []
-        self.paths = []
         self.breadcrumbs = []
-        self.is_finished = False
         self.set_way_point(self.row, self.column)
 
     def move_one_step(self):
-        directions = self.get_possible_directions()
-        if directions:
-            # when not in a dead end choose the direction of the next step
-            next_step = random.choice(directions)
-            self.row = self.row + self.pos[next_step]['r']
-            self.column = self.column + self.pos[next_step]['c']
-        else:
-            # when in a dead end save current path end trace back
-            self.save_current_path()
+        if self.direction == 'forward':
+            directions = self.get_possible_directions()
+            if directions:
+                # when not in a dead end choose the direction of the next step
+                next_step = random.choice(directions)
+                self.row = self.row + self.pos[next_step]['r']
+                self.column = self.column + self.pos[next_step]['c']
+                self.set_way_point(self.row, self.column)
+            else:
+                # when in a dead end switch to trace back mode
+                self.direction = 'trace_back'
+        if self.direction == 'trace_back' and not(self.is_paused):
             self.trace_back()
-        if not(self.is_finished):
-            self.set_way_point(self.row, self.column)
 
     def set_way_point(self, row, column):
         self.breadcrumbs.append([row, column])
@@ -294,12 +320,6 @@ class Walker:
                       if self.maze.loc[r + self.pos[d]['r'], c + self.pos[d]['c']]['isWayPoint'] == False]
         return directions
     
-    def save_current_path(self):
-        if len(self.path_steps) > 1:
-            # a path has at least two way points
-            self.paths.append(self.path_steps)
-        self.path_steps = []
-
     def trace_back(self):
         if self.breadcrumbs:
             self.breadcrumbs.pop() # go back one step
@@ -310,6 +330,7 @@ class Walker:
                 # The walker can't move anywhere.
                 self.is_finished = True
         else:
+            # The walker has traced back his whole path.
             self.is_finished = True
 
 # ------------------- main -----------------------------------------------------
