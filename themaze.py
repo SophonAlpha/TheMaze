@@ -7,7 +7,7 @@ import cv2
 # ---------- script configuration ----------------------------------------------
 print_size = 'A1'
 file_name = 'maze.png'
-cell_size = 10 # cell size in mm, this is the distance between walls
+cell_size = 15 # cell size in mm, this is the distance between walls
 dpi = 300 # print quality in dots per inch
 # the following parameters control the complexity of the maze
 walker_every_x_steps = 10
@@ -134,6 +134,7 @@ class Maze:
         self.walker_every_x_steps = walker_every_x_steps
         self.active_walkers = []
         self.walker_tree = None # store all walkers in a tree structure
+        self.walker_list = [] # store all walkers in a list
         self.path_list = []
         self.initialise_maze()
 
@@ -167,6 +168,7 @@ class Maze:
     def create_walker(self, row, column, parent_walker = None):
         walker = Walker(self.maze, row, column, parent_walker)
         self.active_walkers.append(walker)
+        self.walker_list.append(walker)
         if parent_walker != None:
             # Only if the walker is not the root of the walker tree
             # add the new walker as a child node to its parent.
@@ -189,6 +191,7 @@ class Maze:
         # walker tree.
         if walker.is_finished and len(walker.path_steps) <= 1:
             walker.parent_walker.walker_childs.remove(walker)
+            self.walker_list.remove(walker)
 
     def remove_finished_walker(self, walker):
         if walker.is_finished:
@@ -198,21 +201,11 @@ class Maze:
             self.active_walkers.remove(walker)
 
     def set_walls(self):
-        paths = self.list_all_paths(self.walker_tree)
-        for path in paths:
+        for w in self.walker_list:
+            path = w.path_steps
             for i, _ in enumerate(path[:-1]):
                 self.remove_wall(path[i], path[i+1])
 
-    def list_all_paths(self, walker):
-        path_list = [walker.path_steps]
-        child_list = walker.walker_childs
-        while child_list:
-            child = child_list.pop()
-            path_list.append(child.path_steps)
-            if child.walker_childs:
-                child_list = child_list + child.walker_childs
-        return path_list
-    
     def remove_wall(self, start_cell, end_cell):
         lookup_table = {(-1, 0): {'start': 'up', 'end': 'down'},
                         (1, 0): {'start': 'down', 'end': 'up'},
@@ -330,7 +323,8 @@ class Walker:
                 # The walker can't move anywhere.
                 self.is_finished = True
         else:
-            # The walker has traced back his whole path.
+            # The walker has traced back his whole path and is now back at his
+            # starting point.
             self.is_finished = True
 
 # ------------------- main -----------------------------------------------------
