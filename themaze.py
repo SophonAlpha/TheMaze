@@ -25,7 +25,8 @@ def main():
     maze.create_maze(start_row = maze_entry['row'],
                      start_column = maze_entry['column'])
     # save the image in an image file
-    image.maze_to_image(maze, file_name, paths = True, path_through = True)
+    image.maze_to_image(maze, file_name, paths = False, path_through = False,
+                        walkers_through_maze = True)
     maze.print_stats()
     print('Done!')
 
@@ -59,7 +60,8 @@ class MazeImage:
         self.border_left = int(cell_size * self.dpmm)
 
     def maze_to_image(self, maze, image_file_name, 
-                      walls = True, paths = False, path_through = False):
+                      walls = True, paths = False, path_through = False, 
+                      walkers_through_maze = False):
         img_width = self.border_left + \
                     int(maze.maze_dimensions['columns'] * cell_size * self.dpmm) + \
                     self.border_right
@@ -84,6 +86,12 @@ class MazeImage:
                 self.draw_line(maze.path_through_maze[i],
                                maze.path_through_maze[i+1],
                                self.colours['green'])
+        # show the walker paths that made up the path through the maze
+        if walkers_through_maze:
+            for walker in maze.walkers_through_maze:
+                path = walker['walker'].path_steps
+                for i, _ in enumerate(path[:-1]):
+                    self.draw_line(path[i], path[i+1], self.colours['green'])
         cv2.imwrite(image_file_name, self.img)
 
     def draw_walls(self, cell, colour):
@@ -138,8 +146,8 @@ class Maze:
         self.active_walkers = []
         self.walker_tree = None # store all walkers in a tree structure
         self.walker_list = [] # store all walkers in a list
-        self.path_list = []
         self.path_through_maze = []
+        self.walkers_through_maze = []
         self.initialise_maze()
 
     def initialise_maze(self):
@@ -157,8 +165,7 @@ class Maze:
         self.set_walls()
         self.open_maze(self.maze_entry['row'], self.maze_entry['column'])
         self.open_maze(self.maze_exit['row'], self.maze_exit['column'])
-        self.path_through_maze = self.get_through_maze(self.maze_exit['row'],
-                                                       self.maze_exit['column'])
+        self.get_through_maze(self.maze_exit['row'], self.maze_exit['column'])
 
     def create_paths(self, row = 0, column = 0):
         if not(self.active_walkers):
@@ -248,8 +255,7 @@ class Maze:
     def get_through_maze(self, exit_row, exit_column):
         # find the paths that get to the exit
         walker, path_index = self.find_exit_path(exit_row, exit_column)
-        path_through_maze = self.trace_back_to_start(walker, path_index)
-        return path_through_maze
+        self.trace_back_to_start(walker, path_index)
 
     def find_exit_path(self, exit_row, exit_column):
         for w in self.walker_list:
@@ -261,7 +267,8 @@ class Maze:
         return w, index
 
     def trace_back_to_start(self, walker, index):
-        path_through_maze = walker.path_steps[:index+1]
+        self.path_through_maze = walker.path_steps[:index+1]
+        self.walkers_through_maze = [{'walker': walker, 'index': index}]
         while not(walker.parent_walker == None):
             # get the beginning of the child path
             row, column = walker.path_steps[0]
@@ -271,8 +278,13 @@ class Maze:
                    if x == [row, column]]
             if pos:
                 index = pos[0]
-                path_through_maze = walker.path_steps[:index] + path_through_maze 
-        return path_through_maze
+                self.path_through_maze = walker.path_steps[:index] + self.path_through_maze
+                self.walkers_through_maze = [{'walker': walker, 'index': index}] + self.walkers_through_maze
+    
+    def calculate_complexity(self):
+        for step in self.path_through_maze:
+            row, column = step
+            #TODO: to be completed
     
     def print_stats(self):
         print('\nmaze statistics\n---------------\n')
@@ -280,7 +292,7 @@ class Maze:
                                                               self.maze_dimensions['columns']))
         print('length of path through maze: {} steps'.format(len(self.path_through_maze)))
         print('number of paths: {}'.format(len(self.walker_list)))
-        print('number of walkers that created path through maze: ')
+        print('number of walkers that created path through maze: {}'.format(len(self.walkers_through_maze)))
 
 class Walker:
     
@@ -329,6 +341,7 @@ class Walker:
     def get_possible_directions(self):
         cell = self.maze.loc[self.row, self.column]
         directions = self.get_directions(cell)
+        directions = self.avoid_walls(cell)
         directions = self.avoid_outside_maze(directions, cell)
         directions = self.avoid_set_way_points(directions, cell)
         return directions
