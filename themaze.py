@@ -6,8 +6,8 @@ import cv2
 
 # ---------- script configuration ----------------------------------------------
 print_size = 'A1'
-file_name = 'maze.png'
-cell_size = 15 # cell size in mm, this is the distance between walls
+file_name = 'maze21.png'
+cell_size = 10 # cell size in mm, this is the distance between walls
 dpi = 300 # print quality in dots per inch
 # the following parameters control the complexity of the maze
 walker_every_x_steps = 10
@@ -139,6 +139,7 @@ class Maze:
     
     def __init__(self, maze_dimensions, maze_entry, maze_exit,
                  walker_every_x_steps = 10):
+        self.maze = None
         self.maze_dimensions = maze_dimensions
         self.maze_entry = maze_entry
         self.maze_exit = maze_exit
@@ -281,9 +282,11 @@ class Maze:
                 self.path_through_maze = walker.path_steps[:index] + self.path_through_maze
                 self.walkers_through_maze = [{'walker': walker, 'index': index}] + self.walkers_through_maze
     
-    def calculate_complexity(self):
-        for step in self.path_through_maze:
-            row, column = step
+#     def calculate_complexity(self):
+#         for step in self.path_through_maze:
+#             row, column = step
+#             walker = Walker(self.maze, row, column, None)
+            
             #TODO: to be completed
     
     def print_stats(self):
